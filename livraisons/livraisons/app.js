@@ -8,7 +8,7 @@
 
     var CONFIG = {
         "outil": "livraisons",
-        "titre": "Livraisons et transport : tonnes, secteurs, chauffeurs",
+        "titre": "Livraisons et transport : quoi, qui, combien",
         "fichier": "Livraisons.xlsx",
         "periodes": [
             { "k": "jour", "l": "Aujourd'hui" },
@@ -22,10 +22,10 @@
         ],
         "onglets": [
             { "k": "vue", "l": "Vue d'ensemble" },
-            { "k": "secteurs", "l": "Secteurs" },
             { "k": "chauffeurs", "l": "Chauffeurs" },
-            { "k": "clients", "l": "Clients" },
-            { "k": "articles", "l": "Articles" },
+            { "k": "vehicules", "l": "Véhicules et tournées" },
+            { "k": "articles", "l": "Produits" },
+            { "k": "secteurs", "l": "Secteurs" },
             { "k": "temps", "l": "Temps" },
             { "k": "societes", "l": "Sociétés" },
             { "k": "delais", "l": "Ponctualité" },
@@ -41,8 +41,8 @@
             "missions": "une mission de transport, quantité du produit",
             "bl": "un bon de livraison BC, lignes = écritures article"
         },
-        "fiches": { "client": "Fiche client", "article": "Fiche article", "chauffeur": "Fiche chauffeur", "secteur": "Fiche secteur" },
-        "selecteurs": [["clients", "Clients"], ["articles", "Articles"], ["chauffeurs", "Chauffeurs"], ["secteurs", "Secteurs"]]
+        "fiches": { "article": "Fiche produit", "chauffeur": "Fiche chauffeur", "vehicule": "Fiche véhicule", "secteur": "Fiche secteur" },
+        "selecteurs": [["articles", "Produits"], ["chauffeurs", "Chauffeurs"], ["vehicules", "Véhicules"], ["secteurs", "Secteurs"]]
     };
 
     /* =====================================================================
