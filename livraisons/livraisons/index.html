@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Livraisons | Agrivalor data-tools</title>
+  <link rel="icon" href="/data-tools/_commun/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/data-tools/_commun/dt.css">
+  <link rel="stylesheet" href="/data-tools/livraisons/style.css">
+  <script src="/data-tools/_commun/dt.js" defer></script>
+  <script src="/data-tools/livraisons/app.js" defer></script>
+</head>
+<body>
+  <header id="dt-entete" class="dt-entete"></header>
+
+  <main class="dt-page">
+    <div id="message" class="dt-msg dt-cache"></div>
+    <div id="bandeau" class="dt-msg dt-msg-alerte dt-cache"></div>
+
+    <section class="dt-carte dt-pile tb-filtres">
+      <div class="dt-ligne">
+        <span id="etat" class="dt-muet">Chargement…</span>
+        <span id="calcul" class="dt-muet"></span>
+        <span class="dt-espace"></span>
+        <button id="btn-reinit" type="button" class="dt-btn dt-btn-sec">Réinitialiser</button>
+        <button id="btn-recharger" type="button" class="dt-btn dt-btn-sec dt-cache">Recharger depuis BC</button>
+      </div>
+      <div id="progression" class="tb-progression dt-cache">
+        <div id="progression-barre" class="tb-progression-barre"></div>
+        <span id="progression-texte"></span>
+      </div>
+      <div class="dt-ligne tb-ligne-filtres">
+        <span class="tb-lib">Période</span>
+        <span id="periodes" class="tb-chips" role="group" aria-label="Période"></span>
+        <input id="du" class="dt-input tb-date" type="date" aria-label="Du">
+        <span class="dt-muet">au</span>
+        <input id="au" class="dt-input tb-date" type="date" aria-label="Au">
+      </div>
+      <div class="dt-ligne tb-ligne-filtres">
+        <span class="tb-lib">Sociétés</span>
+        <span id="societes" class="tb-chips" role="group" aria-label="Sociétés"></span>
+        <span class="tb-lib">Graphiques en</span>
+        <span id="mesure" class="tb-segment" role="group" aria-label="Mesure des graphiques"></span>
+        <span class="dt-espace"></span>
+        <label class="tb-coche" title="Ajoute deux onglets avec tous les champs publiés par BC pour les BL et les lignes de la sélection">
+          <input id="export-brut" type="checkbox" checked> données BC brutes
+        </label>
+        <button id="btn-export" type="button" class="dt-btn">Export Excel</button>
+      </div>
+      <div class="tb-selecteurs">
+        <div id="sel-clients"></div>
+        <div id="sel-articles"></div>
+        <div id="sel-chauffeurs"></div>
+        <div id="sel-secteurs"></div>
+      </div>
+    </section>
+
+    <p id="vide" class="dt-vide tb-vide-grand dt-cache">Aucune donnée en mémoire. Le chargement BC démarre 30 s après un deploy et chaque nuit ; un administrateur peut aussi le lancer avec « Recharger depuis BC ».</p>
+
+    <nav id="onglets" class="dt-onglets" role="tablist" aria-label="Vues"></nav>
+
+    <div id="fiche-entete" class="dt-carte dt-ligne tb-fiche dt-cache">
+      <button id="fiche-retour" type="button" class="dt-btn dt-btn-sec">Retour</button>
+      <span id="fiche-type" class="tb-fiche-type"></span>
+      <span id="fiche-titre" class="tb-fiche-titre"></span>
+      <span class="dt-espace"></span>
+      <button id="fiche-fermer" type="button" class="dt-btn dt-btn-sec">Fermer</button>
+    </div>
+
+    <div id="blocs" class="tb-grille"></div>
+  </main>
+</body>
+</html>
