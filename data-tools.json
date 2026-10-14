@@ -1,0 +1,476 @@
+[
+    {
+        "id": "2c7cfe9ed8431719",
+        "type": "subflow",
+        "name": "DT session",
+        "info": "Contrôle de session data-tools, à placer juste après chaque http-in /dt-api/<outil>/<action>.\n\n- Propriété OUTIL : identifiant de l'outil (vide = session seule).\n- Sortie 1 : autorisé, msg.dtUser = { login, nom, admin, outils }.\n- Sortie 2 : 401 / 403 déjà prêt, à brancher sur un http response.\n- Tout POST/PUT/DELETE doit porter l'en-tête X-DT: 1 (dtFetch le fait).\n- Les actions admin restent à tester dans le flow de l'outil : if (!msg.dtUser.admin) → 403.",
+        "category": "",
+        "in": [
+            {
+                "x": 60,
+                "y": 80,
+                "wires": [
+                    {
+                        "id": "76574b4a174e01f5"
+                    }
+                ]
+            }
+        ],
+        "out": [
+            {
+                "x": 460,
+                "y": 60,
+                "wires": [
+                    {
+                        "id": "76574b4a174e01f5",
+                        "port": 0
+                    }
+                ]
+            },
+            {
+                "x": 460,
+                "y": 100,
+                "wires": [
+                    {
+                        "id": "76574b4a174e01f5",
+                        "port": 1
+                    }
+                ]
+            }
+        ],
+        "env": [
+            {
+                "name": "OUTIL",
+                "type": "str",
+                "value": ""
+            }
+        ],
+        "meta": {},
+        "color": "#A6BBCF",
+        "inputLabels": [
+            "requête http-in"
+        ],
+        "outputLabels": [
+            "autorisé (msg.dtUser)",
+            "refus 401/403"
+        ],
+        "icon": "font-awesome/fa-lock"
+    },
+    {
+        "id": "76574b4a174e01f5",
+        "type": "function",
+        "z": "2c7cfe9ed8431719",
+        "name": "Contrôle session",
+        "func": "// Subflow DT session : sortie 1 = msg.dtUser (autorisé), sortie 2 = 401/403 prêt pour http response\n// OUTIL vide = session seule (portail, /auth/me)\nconst outil = env.get('OUTIL') || '';\n\nfunction refus(code, erreur, effacer) {\n    msg.statusCode = code;\n    msg.headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };\n    msg.payload = { erreur };\n    if (effacer) msg.cookies = { dt_session: { value: '', maxAge: 0, path: '/data-tools', httpOnly: true, secure: true, sameSite: 'strict' } };\n    return [null, msg];\n}\n\nconst P = global.get('dt_params') || {};\nconst gl = (P.sessionGlissanteH || 12) * 3600e3, mx = (P.sessionMaxH || 24) * 3600e3;\nconst jeton = ((msg.req && msg.req.cookies) || {}).dt_session;\nif (typeof jeton !== 'string' || jeton.length < 20 || jeton.length > 100) return refus(401, 'non_authentifie', !!jeton);\n\nconst cle = crypto.createHash('sha256').update(jeton).digest('hex');\nconst S = global.get('dt_sessions') || {};\nconst s = S[cle];\nconst now = Date.now();\nif (!s || now - s.vu > gl || now - s.cree > mx) {\n    if (s) { delete S[cle]; global.set('dt_sessions', S); }\n    return refus(401, 'non_authentifie', true);\n}\nif (now - s.vu > 60000) { s.vu = now; global.set('dt_sessions', S); }\n\nif (outil && !(s.outils.includes('*') || s.outils.includes(outil))) return refus(403, 'acces_refuse');\n\nconst methode = String(msg.req.method || 'GET').toUpperCase();\nif (methode !== 'GET' && methode !== 'HEAD' && msg.req.headers['x-dt'] !== '1') return refus(403, 'entete_x_dt_manquant');\n\nmsg.dtUser = { login: s.login, nom: s.nom, admin: !!s.admin, outils: [...s.outils] };\nreturn [msg, null];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            }
+        ],
+        "x": 260,
+        "y": 80,
+        "wires": [
+            [],
+            []
+        ]
+    },
+    {
+        "id": "69ca09937bb8d100",
+        "type": "comment",
+        "z": "60d0726529419309",
+        "name": "Paramètres",
+        "info": "Groupes Entra → outils/admin, catalogue du portail, durées de session. Relu à chaque deploy.",
+        "x": 150,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "13d4910349706976",
+        "type": "function",
+        "z": "60d0726529419309",
+        "name": "Paramètres data-tools",
+        "func": "// Voir l'onglet On Start\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "// ===== PARAMÈTRES DATA-TOOLS (relus au deploy) =====\n// Droits = union des groupes Entra (objectId) dont l'utilisateur est membre direct.\n// '*' = tous les outils. admin = actions sensibles (recharger BC, stop, écritures).\n// Les droits sont figés à la connexion : retirer quelqu'un d'un groupe prend effet\n// à sa prochaine connexion (au plus tard sessionMaxH).\nconst PARAMS = {\n    domaines: ['agrivalor.eu', 'ecobois-alsace.com'],\n    sessionGlissanteH: 12,   // expiration après 12 h sans activité\n    sessionMaxH: 24,         // reconnexion Microsoft obligatoire au bout de 24 h\n\n    groupes: {\n        // 'objectId du groupe': { nom, outils, admin }\n        '62c433a7-c107-4ece-8e53-779695084d92': { nom: 'DT-Admins', outils: ['*'], admin: true },\n        '60b03616-42ca-46f1-a192-92abeab725a8': { nom: 'DT-Commercial', outils: ['tj-commercial', 'ventes-tj', 'ecobois-commercial'], admin: false },\n        'f1a9e53c-150a-40f9-bf0e-b6a9183d0751': { nom: 'DT-Exploitation', outils: ['pesees-clients'], admin: false },\n        'dc1b75c6-068a-418d-b152-6adc1eeb7157': { nom: 'DT-Data-BC', outils: ['bc-controles'], admin: false },\n        'd190a1d9-7fd5-4393-a868-019060244a66': { nom: 'DT-Metha', outils: ['bascule-metha'], admin: false },\n        '3fcac903-28c4-4355-aff6-1af6c89b518a': { nom: 'DT-Explorateur', outils: ['explorateur-bc'], admin: false },\n        'e3d32f49-ecd3-478f-a14f-efcbafb0a66f': { nom: 'DT-Promos', outils: ['commande-vente', 'commande-vente-promos'], admin: false },\n        '9b363438-78bf-42ad-863f-f67cf3e55664': { nom: 'DT-EcoBois', outils: ['gestion-stock-ecobois'], admin: false },\n    },\n\n    // Secours sans groupe (login en minuscules), vide en temps normal\n    comptes: {\n        // 'prenom.nom@agrivalor.eu': { outils: ['*'], admin: true }\n    },\n\n    // Catalogue du portail. publie:false = visible des admins seulement (recette en cours)\n    outils: [\n        { id: 'pesees-clients', nom: 'Pesées par client', description: 'Tonnages entrants et sortants par période, client, produit et site', publie: true },\n        { id: 'tj-commercial', nom: 'Commercial Terre & Jardins', description: 'Chiffre d\\'affaires Pro et comptoir, articles, clients, objectifs', publie: true },\n        { id: 'ventes-tj', nom: 'Ventes T&J du jour', description: 'Ventes Pro et Particulier du jour, mouvements et rattrapage', publie: false },\n        { id: 'ecobois-commercial', nom: 'Commercial Eco Bois', description: 'Ventes de bois de chauffage, clients, livraisons, stock', publie: true },\n        { id: 'bc-controles', nom: 'Contrôles BC', description: 'Contrôles qualité des données Business Central', publie: true },\n        { id: 'bascule-metha', nom: 'Bascule Metha', description: 'Poids pesés à Agrivalor Énergie par catégorie d\\'article et par jour', publie: true },\n        { id: 'explorateur-bc', nom: 'Explorateur BC', description: 'Requêtes au clic sur la base issue de Business Central', publie: true },\n        { id: 'commande-vente', nom: 'Commande vente', description: 'Saisie de commandes vente BC façon caisse', publie: false },\n        { id: 'gestion-stock-ecobois', nom: 'Gestion stock Eco Bois', description: 'Stock par article et prévision par semaine Eco Bois', publie: true}\n    ]\n};\n\nglobal.set('dt_params', PARAMS);\nconst nbG = Object.keys(PARAMS.groupes).filter(k => !k.startsWith('REMPLACER')).length;\nnode.status({ fill: nbG ? 'green' : 'yellow', shape: 'dot', text: `${nbG} groupe(s) configuré(s), ${PARAMS.outils.length} outils` });",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "ae612ad54e7a7c5d",
+        "type": "http in",
+        "z": "60d0726529419309",
+        "name": "GET /auth/start",
+        "url": "/dt-api/auth/start",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 160,
+        "y": 120,
+        "wires": [
+            [
+                "6612e64bf05f9408"
+            ]
+        ]
+    },
+    {
+        "id": "6612e64bf05f9408",
+        "type": "function",
+        "z": "60d0726529419309",
+        "name": "Démarrer connexion",
+        "func": "// GET /dt-api/auth/start?next=...  →  302 vers Microsoft (code + PKCE)\nconst b64url = b => b.toString('base64url');\nconst alea = n => b64url(crypto.randomBytes(n));\n\nfunction redir(loc, cookies) {\n    msg.statusCode = 302;\n    msg.headers = { Location: loc, 'Cache-Control': 'no-store' };\n    msg.payload = '';\n    if (cookies) msg.cookies = cookies;\n    return msg;\n}\nfunction nextSur(n) {\n    if (typeof n !== 'string' || n.length > 500) return '/data-tools/';\n    const ok = n.startsWith('/data-tools/') && !/\\/\\/|\\\\|\\0/.test(n) && !/\\/\\.\\.?(\\/|$|\\?)/.test(n)\n        && !n.startsWith('/data-tools/login') && !n.startsWith('/data-tools/api/');\n    return ok ? n : '/data-tools/';\n}\n\nconst P = global.get('dt_params');\nconst tenant = env.get('DT_TENANT_ID');\nconst client = env.get('DT_CLIENT_ID');\nconst base = String(env.get('DT_BASE_URL') || '').replace(/\\/+$/, '');\nif (!P || !tenant || !client || !env.get('DT_CLIENT_SECRET') || !base) {\n    node.warn('data-tools : DT_TENANT_ID, DT_CLIENT_ID, DT_CLIENT_SECRET ou DT_BASE_URL manquant');\n    return redir('/data-tools/login/?erreur=config');\n}\n\nconst now = Date.now();\nconst EN = global.get('dt_pending') || {};\nfor (const k of Object.keys(EN)) if (EN[k].exp < now) delete EN[k];\nif (Object.keys(EN).length > 1000) return redir('/data-tools/login/?erreur=charge');\n\nconst state = alea(32), nonce = alea(32), verifier = alea(48), pre = alea(32);\nconst challenge = b64url(crypto.createHash('sha256').update(verifier).digest());\nEN[state] = { pre, verifier, nonce, next: nextSur((msg.req.query || {}).next), exp: now + 10 * 60 * 1000 };\nglobal.set('dt_pending', EN);\n\nconst q = {\n    client_id: client,\n    response_type: 'code',\n    redirect_uri: base + '/data-tools/api/auth/callback',\n    response_mode: 'query',\n    scope: 'openid profile email',\n    state, nonce,\n    code_challenge: challenge,\n    code_challenge_method: 'S256',\n    prompt: 'select_account'\n};\nconst qs = Object.entries(q).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');\n\nreturn redir(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/authorize?${qs}`, {\n    dt_pre: { value: pre, httpOnly: true, secure: true, sameSite: 'lax', path: '/data-tools/api/auth/', maxAge: 10 * 60 * 1000 }\n});\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            }
+        ],
+        "x": 430,
+        "y": 120,
+        "wires": [
+            [
+                "1d9cf3b7056c4361"
+            ]
+        ]
+    },
+    {
+        "id": "1d9cf3b7056c4361",
+        "type": "http response",
+        "z": "60d0726529419309",
+        "name": "Réponse start",
+        "statusCode": "",
+        "headers": {},
+        "x": 680,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "75330c8ce52c2b85",
+        "type": "http in",
+        "z": "60d0726529419309",
+        "name": "GET /auth/callback",
+        "url": "/dt-api/auth/callback",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 200,
+        "wires": [
+            [
+                "18c1cda41f0d352e"
+            ]
+        ]
+    },
+    {
+        "id": "18c1cda41f0d352e",
+        "type": "function",
+        "z": "60d0726529419309",
+        "name": "Valider retour Microsoft",
+        "func": "// GET /dt-api/auth/callback?code&state  →  sortie 1 : échange du code, sortie 2 : réponse d'erreur\nfunction erreur(code) {\n    msg.statusCode = 302;\n    msg.headers = { Location: '/data-tools/login/?erreur=' + code, 'Cache-Control': 'no-store' };\n    msg.payload = '';\n    msg.cookies = { dt_pre: { value: '', maxAge: 0, path: '/data-tools/api/auth/', httpOnly: true, secure: true, sameSite: 'lax' } };\n    return [null, msg];\n}\n\nconst q = msg.req.query || {};\nif (q.error) {\n    node.warn(`data-tools : retour Microsoft en erreur ${String(q.error).slice(0, 60)} ${String(q.error_description || '').slice(0, 200)}`);\n    return erreur(q.error === 'access_denied' ? 'annule' : 'ms');\n}\nif (typeof q.state !== 'string' || typeof q.code !== 'string' || q.code.length > 4000) return erreur('etat');\n\nconst EN = global.get('dt_pending') || {};\nconst p = EN[q.state];\nif (p) { delete EN[q.state]; global.set('dt_pending', EN); }   // usage unique\nif (!p || p.exp < Date.now()) return erreur('expire');\n\nconst pre = (msg.req.cookies || {}).dt_pre;\nif (!pre || pre !== p.pre) return erreur('etat');                // anti login-CSRF\n\nconst tenant = env.get('DT_TENANT_ID');\nconst base = String(env.get('DT_BASE_URL') || '').replace(/\\/+$/, '');\nconst form = {\n    client_id: env.get('DT_CLIENT_ID'),\n    client_secret: env.get('DT_CLIENT_SECRET'),\n    grant_type: 'authorization_code',\n    code: q.code,\n    redirect_uri: base + '/data-tools/api/auth/callback',\n    code_verifier: p.verifier,\n    scope: 'openid profile email'\n};\n\nmsg.dt = { nonce: p.nonce, next: p.next };\nmsg.url = `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`;\nmsg.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };\nmsg.payload = Object.entries(form).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');\nreturn [msg, null];\n",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            }
+        ],
+        "x": 430,
+        "y": 200,
+        "wires": [
+            [
+                "d99da1c72b24b5cf"
+            ],
+            [
+                "e339d4a91a2f45e8"
+            ]
+        ],
+        "outputLabels": [
+            "échange du code",
+            "erreur"
+        ]
+    },
+    {
+        "id": "d99da1c72b24b5cf",
+        "type": "http request",
+        "z": "60d0726529419309",
+        "name": "Jeton Microsoft",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 680,
+        "y": 180,
+        "wires": [
+            [
+                "5269a1a69476a695"
+            ]
+        ]
+    },
+    {
+        "id": "5269a1a69476a695",
+        "type": "function",
+        "z": "60d0726529419309",
+        "name": "Ouvrir session",
+        "func": "// Réponse du endpoint token Microsoft → contrôles id_token → droits → session\n// id_token reçu directement du endpoint token en TLS (client confidentiel) :\n// signature non revérifiée (OIDC Core 3.1.3.7), claims contrôlés.\nconst d = msg.dt || {};\ndelete msg.dt;\nconst P = global.get('dt_params') || {};\nconst tenant = env.get('DT_TENANT_ID');\nconst client = env.get('DT_CLIENT_ID');\n\nconst effacerPre = { value: '', maxAge: 0, path: '/data-tools/api/auth/', httpOnly: true, secure: true, sameSite: 'lax' };\nfunction fin(loc, cookieSession) {\n    msg.statusCode = 302;\n    msg.headers = { Location: loc, 'Cache-Control': 'no-store' };\n    msg.payload = '';\n    msg.cookies = { dt_pre: effacerPre };\n    if (cookieSession) msg.cookies.dt_session = cookieSession;\n    return msg;\n}\nconst erreur = c => fin('/data-tools/login/?erreur=' + c);\n\nif (msg.statusCode !== 200 || !msg.payload || typeof msg.payload.id_token !== 'string') {\n    const e = msg.payload && typeof msg.payload === 'object' ? `${msg.payload.error} ${msg.payload.error_description || ''}` : String(msg.payload);\n    node.warn(`data-tools : échange du code refusé (${msg.statusCode}) ${e.slice(0, 300)}`);\n    return erreur('jeton');\n}\n\nlet c;\ntry { c = JSON.parse(Buffer.from(msg.payload.id_token.split('.')[1], 'base64url').toString('utf8')); }\ncatch (e) { return erreur('jeton'); }\n\nconst now = Math.floor(Date.now() / 1000);\nif (c.iss !== `https://login.microsoftonline.com/${tenant}/v2.0` || c.aud !== client || c.tid !== tenant\n    || c.nonce !== d.nonce || !(c.exp > now - 60)) {\n    node.warn('data-tools : id_token rejeté (iss/aud/tid/nonce/exp)');\n    return erreur('jeton');\n}\n\nconst login = String(c.preferred_username || c.email || c.upn || '').toLowerCase().trim();\nconst domaine = login.split('@')[1] || '';\nif (!(P.domaines || []).includes(domaine) || c.idp) {\n    node.warn(`data-tools : compte refusé (domaine ou invité) ${login}`);\n    return erreur('domaine');\n}\nif (c._claim_names && c._claim_names.groups) {\n    node.warn(`data-tools : dépassement de groupes (plus de 200) pour ${login}`);\n    return erreur('groupes');\n}\n\n// Droits = union des groupes configurés + compte de secours\nconst outils = new Set();\nlet admin = false;\nconst via = [];\nfor (const g of (Array.isArray(c.groups) ? c.groups : [])) {\n    const r = (P.groupes || {})[g];\n    if (!r) continue;\n    (r.outils || []).forEach(o => outils.add(o));\n    if (r.admin) admin = true;\n    via.push(r.nom || g);\n}\nconst cpt = (P.comptes || {})[login];\nif (cpt) { (cpt.outils || []).forEach(o => outils.add(o)); if (cpt.admin) admin = true; via.push('compte'); }\n\nif (!outils.size && !admin) {\n    node.warn(`data-tools : aucun groupe autorisé pour ${login}`);\n    return erreur('aucun_droit');\n}\n\nconst jeton = crypto.randomBytes(32).toString('base64url');\nconst cle = crypto.createHash('sha256').update(jeton).digest('hex');\nconst S = global.get('dt_sessions') || {};\nconst t = Date.now();\nS[cle] = { login, nom: String(c.name || login).slice(0, 120), admin, outils: [...outils], oid: c.oid, cree: t, vu: t };\nglobal.set('dt_sessions', S);\nnode.log(`data-tools : connexion ${login} [${via.join(', ')}]${admin ? ' admin' : ''}`);\n\nreturn fin('/data-tools/login/?fait=1&next=' + encodeURIComponent(d.next || '/data-tools/'),\n    { value: jeton, httpOnly: true, secure: true, sameSite: 'strict', path: '/data-tools' });\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            }
+        ],
+        "x": 890,
+        "y": 180,
+        "wires": [
+            [
+                "e339d4a91a2f45e8"
+            ]
+        ]
+    },
+    {
+        "id": "e339d4a91a2f45e8",
+        "type": "http response",
+        "z": "60d0726529419309",
+        "name": "Réponse callback",
+        "statusCode": "",
+        "headers": {},
+        "x": 1110,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "4042a6108625683d",
+        "type": "http in",
+        "z": "60d0726529419309",
+        "name": "GET /auth/check",
+        "url": "/dt-api/auth/check",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 160,
+        "y": 280,
+        "wires": [
+            [
+                "f334448c2ff6c5b5"
+            ]
+        ]
+    },
+    {
+        "id": "f334448c2ff6c5b5",
+        "type": "function",
+        "z": "60d0726529419309",
+        "name": "Contrôle nginx",
+        "func": "// GET /dt-api/auth/check  (sous-requête auth_request de nginx)\n// 204 = autorisé, 401 = pas de session, 403 = pas le droit sur l'outil ou URI suspecte\nfunction rep(code) { msg.statusCode = code; msg.payload = ''; msg.headers = { 'Cache-Control': 'no-store' }; return msg; }\n\nconst brut = String(msg.req.headers['x-original-uri'] || '');\nlet chemin;\ntry { chemin = decodeURIComponent(brut.split('?')[0]); } catch (e) { return rep(403); }\n// URI brute ($request_uri) : on refuse tout ce que nginx normaliserait autrement\nif (!chemin.startsWith('/data-tools/') || /\\/\\/|\\\\|\\0/.test(chemin) || /\\/\\.\\.?(\\/|$)/.test(chemin)) return rep(403);\n\nconst P = global.get('dt_params') || {};\nconst gl = (P.sessionGlissanteH || 12) * 3600e3, mx = (P.sessionMaxH || 24) * 3600e3;\nconst jeton = (msg.req.cookies || {}).dt_session;\nif (typeof jeton !== 'string' || jeton.length < 20 || jeton.length > 100) return rep(401);\nconst cle = crypto.createHash('sha256').update(jeton).digest('hex');\nconst S = global.get('dt_sessions') || {};\nconst s = S[cle];\nconst now = Date.now();\nif (!s || now - s.vu > gl || now - s.cree > mx) {\n    if (s) { delete S[cle]; global.set('dt_sessions', S); }\n    return rep(401);\n}\nif (now - s.vu > 60000) { s.vu = now; global.set('dt_sessions', S); }\n\nlet outil = '';\nif (chemin.startsWith('/data-tools/api/')) {\n    const m = chemin.match(/^\\/data-tools\\/api\\/([a-z0-9-]+)\\//);\n    if (!m) return rep(403);\n    outil = m[1];\n} else {\n    const m = chemin.match(/^\\/data-tools\\/([^\\/]+)\\//);\n    if (m) outil = m[1];\n}\nif (!outil || s.outils.includes('*') || s.outils.includes(outil)) return rep(204);\nreturn rep(403);\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            }
+        ],
+        "x": 430,
+        "y": 280,
+        "wires": [
+            [
+                "fd3e0728fd72be8b"
+            ]
+        ]
+    },
+    {
+        "id": "fd3e0728fd72be8b",
+        "type": "http response",
+        "z": "60d0726529419309",
+        "name": "Réponse check",
+        "statusCode": "",
+        "headers": {},
+        "x": 680,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "3b243a07cd98441e",
+        "type": "http in",
+        "z": "60d0726529419309",
+        "name": "GET /auth/me",
+        "url": "/dt-api/auth/me",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 150,
+        "y": 360,
+        "wires": [
+            [
+                "ed4a54ef191b1137"
+            ]
+        ]
+    },
+    {
+        "id": "ed4a54ef191b1137",
+        "type": "subflow:2c7cfe9ed8431719",
+        "z": "60d0726529419309",
+        "name": "DT session",
+        "x": 400,
+        "y": 360,
+        "wires": [
+            [
+                "c91405bdc9b0ddac"
+            ],
+            [
+                "b3e03f897a1f5866"
+            ]
+        ]
+    },
+    {
+        "id": "c91405bdc9b0ddac",
+        "type": "function",
+        "z": "60d0726529419309",
+        "name": "Profil",
+        "func": "// GET /dt-api/auth/me  →  profil + catalogue des outils autorisés\nconst P = global.get('dt_params') || {};\nconst u = msg.dtUser;\nconst tout = u.outils.includes('*');\nconst catalogue = (P.outils || [])\n    .filter(o => (tout || u.outils.includes(o.id)) && (o.publie || u.admin))\n    .map(o => ({ id: o.id, nom: o.nom, description: o.description || '', publie: !!o.publie, url: `/data-tools/${o.id}/` }));\nmsg.payload = { login: u.login, nom: u.nom, admin: u.admin, outils: u.outils, catalogue };\nmsg.headers = { 'Cache-Control': 'no-store' };\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 650,
+        "y": 340,
+        "wires": [
+            [
+                "b3e03f897a1f5866"
+            ]
+        ]
+    },
+    {
+        "id": "b3e03f897a1f5866",
+        "type": "http response",
+        "z": "60d0726529419309",
+        "name": "Réponse me",
+        "statusCode": "",
+        "headers": {},
+        "x": 880,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "4bdcc737924bca0f",
+        "type": "http in",
+        "z": "60d0726529419309",
+        "name": "POST /auth/logout",
+        "url": "/dt-api/auth/logout",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 160,
+        "y": 440,
+        "wires": [
+            [
+                "36cffc4574d4ef39"
+            ]
+        ]
+    },
+    {
+        "id": "36cffc4574d4ef39",
+        "type": "function",
+        "z": "60d0726529419309",
+        "name": "Déconnexion",
+        "func": "// POST /dt-api/auth/logout (en-tête X-DT: 1)\nmsg.headers = { 'Cache-Control': 'no-store' };\nif (msg.req.headers['x-dt'] !== '1') { msg.statusCode = 403; msg.payload = { erreur: 'entete_x_dt_manquant' }; return msg; }\nconst jeton = (msg.req.cookies || {}).dt_session;\nif (typeof jeton === 'string' && jeton.length <= 100) {\n    const cle = crypto.createHash('sha256').update(jeton).digest('hex');\n    const S = global.get('dt_sessions') || {};\n    if (S[cle]) { node.log(`data-tools : déconnexion ${S[cle].login}`); delete S[cle]; global.set('dt_sessions', S); }\n}\nmsg.cookies = { dt_session: { value: '', maxAge: 0, path: '/data-tools', httpOnly: true, secure: true, sameSite: 'strict' } };\nmsg.statusCode = 200;\nmsg.payload = { ok: true };\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            }
+        ],
+        "x": 430,
+        "y": 440,
+        "wires": [
+            [
+                "cd4c2dd760f57370"
+            ]
+        ]
+    },
+    {
+        "id": "cd4c2dd760f57370",
+        "type": "http response",
+        "z": "60d0726529419309",
+        "name": "Réponse logout",
+        "statusCode": "",
+        "headers": {},
+        "x": 620,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "cea589f63e4e68ee",
+        "type": "inject",
+        "z": "60d0726529419309",
+        "name": "Toutes les 15 min",
+        "props": [],
+        "repeat": "900",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "30",
+        "topic": "",
+        "x": 170,
+        "y": 500,
+        "wires": [
+            [
+                "f19fc471134607df"
+            ]
+        ]
+    },
+    {
+        "id": "f19fc471134607df",
+        "type": "function",
+        "z": "60d0726529419309",
+        "name": "Purge sessions",
+        "func": "// Purge des sessions expirées et des connexions en attente\nconst P = global.get('dt_params') || {};\nconst gl = (P.sessionGlissanteH || 12) * 3600e3, mx = (P.sessionMaxH || 24) * 3600e3;\nconst now = Date.now();\nconst S = global.get('dt_sessions') || {};\nlet n = 0;\nfor (const k of Object.keys(S)) if (now - S[k].vu > gl || now - S[k].cree > mx) { delete S[k]; n++; }\nglobal.set('dt_sessions', S);\nconst EN = global.get('dt_pending') || {};\nfor (const k of Object.keys(EN)) if (EN[k].exp < now) delete EN[k];\nglobal.set('dt_pending', EN);\nnode.status({ fill: 'green', shape: 'dot', text: `${Object.keys(S).length} session(s) active(s), ${n} purgée(s) à ${new Date().toLocaleTimeString('fr-FR')}` });\nreturn null;\n",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 500,
+        "wires": []
+    }
+]
