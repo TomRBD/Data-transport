@@ -1,13 +1,14 @@
-/* Livraisons : tableau de bord des livraisons Business Central, page data-tools.
-   Quantités et tonnes par secteur, chauffeur, véhicule, client, article, société ;
-   délais, carnet à livrer, contrôle des données, export Excel complet (données BC brutes comprises).
+/* Livraisons : tableau de bord transport et livraisons Business Central, page data-tools.
+   Trois sources analysées séparément : pesées (pont-bascule), missions de transport, bons de livraison.
+   Quantités et tonnes par secteur, chauffeur, véhicule, tournée, client, article, société ;
+   ponctualité, carnet en attente, contrôle des données, export Excel complet (données BC brutes comprises).
    Aucune dépendance externe, tout passe par dt.js (dtInit, dtFetch, dtDownload). */
 (function () {
     'use strict';
 
     var CONFIG = {
         "outil": "livraisons",
-        "titre": "Livraisons : tonnes, secteurs, chauffeurs",
+        "titre": "Livraisons et transport : tonnes, secteurs, chauffeurs",
         "fichier": "Livraisons.xlsx",
         "periodes": [
             { "k": "jour", "l": "Aujourd'hui" },
@@ -27,12 +28,19 @@
             { "k": "articles", "l": "Articles" },
             { "k": "temps", "l": "Temps" },
             { "k": "societes", "l": "Sociétés" },
-            { "k": "delais", "l": "Délais" },
-            { "k": "carnet", "l": "Carnet à livrer" },
-            { "k": "livraisons", "l": "Bons de livraison" },
+            { "k": "delais", "l": "Ponctualité" },
+            { "k": "carnet", "l": "En attente" },
+            { "k": "livraisons", "l": "Documents" },
             { "k": "controle", "l": "Contrôle" }
         ],
-        "mesures": [["t", "Tonnes"], ["liv", "Livraisons"]],
+        "mesures": [["t", "Tonnes"], ["liv", "Nombre"]],
+        "sources": [["pesees", "Pesées"], ["missions", "Missions"], ["bl", "Bons de livraison"]],
+        "sens": [["L", "Livraisons"], ["C", "Collectes"], ["all", "Tout"]],
+        "notes": {
+            "pesees": "une pesée = un passage pont-bascule, poids net pesé",
+            "missions": "une mission de transport, quantité du produit",
+            "bl": "un bon de livraison BC, lignes = écritures article"
+        },
         "fiches": { "client": "Fiche client", "article": "Fiche article", "chauffeur": "Fiche chauffeur", "secteur": "Fiche secteur" },
         "selecteurs": [["clients", "Clients"], ["articles", "Articles"], ["chauffeurs", "Chauffeurs"], ["secteurs", "Secteurs"]]
     };
@@ -687,7 +695,8 @@
         today: '',
         dMin: '',
         periode: 'mois',
-        filtres: { pfs: [], mesure: 't' },
+        filtres: { pfs: [], mesure: 't', source: 'pesees', sens: 'L' },
+        nbSources: {},
         pfs: [],
         pfNoms: [],
         donnees: null,
@@ -783,21 +792,32 @@
         });
     }
 
-    function dessinerMesure() {
-        var zone = $('mesure');
+    // choix exclusif : mesure des graphiques, source des données, sens
+    function dessinerSegment(zoneId, choix, cle, libelle) {
+        var zone = $(zoneId);
         zone.textContent = '';
-        CONFIG.mesures.forEach(function (m) {
-            var actif = etat.filtres.mesure === m[0];
-            var b = el('button', 'tb-segment-choix' + (actif ? ' tb-segment-actif' : ''), m[1]);
+        choix.forEach(function (m) {
+            var actif = etat.filtres[cle] === m[0];
+            var b = el('button', 'tb-segment-choix' + (actif ? ' tb-segment-actif' : ''), libelle ? libelle(m) : m[1]);
             b.type = 'button';
             b.setAttribute('aria-pressed', actif ? 'true' : 'false');
             b.addEventListener('click', function () {
-                etat.filtres.mesure = m[0];
-                dessinerMesure();
+                etat.filtres[cle] = m[0];
+                dessinerSegments();
                 programmer();
             });
             zone.append(b);
         });
+    }
+
+    function dessinerSegments() {
+        dessinerSegment('mesure', CONFIG.mesures, 'mesure');
+        dessinerSegment('source', CONFIG.sources, 'source', function (m) {
+            var n = etat.nbSources[m[0]];
+            return m[1] + (n !== undefined ? ' (' + nf(n, 0, 0) + ')' : '');
+        });
+        dessinerSegment('sens', CONFIG.sens, 'sens');
+        $('source-note').textContent = CONFIG.notes[etat.filtres.source] || '';
     }
 
     function filtresCourants() {
@@ -805,7 +825,9 @@
             du: $('du').value,
             au: $('au').value,
             pfs: etat.filtres.pfs.slice(),
-            mesure: etat.filtres.mesure
+            mesure: etat.filtres.mesure,
+            source: etat.filtres.source,
+            sens: etat.filtres.sens
         };
         CONFIG.selecteurs.forEach(function (s) { f[s[0]] = selecteurs[s[0]].valeurs(); });
         return f;
@@ -820,7 +842,11 @@
     function majEtat(e) {
         e = e || {};
         if (e.today) etat.today = e.today;
-        if (e.dMin) etat.dMin = e.dMin;
+        if (e.sources) {
+            etat.nbSources = {};
+            e.sources.forEach(function (x) { etat.nbSources[x.k] = x.docs; });
+            if ($('source').childNodes.length) dessinerSegments();
+        }
         $('etat').textContent = e.loadedAt ? 'Données BC du ' + dateHeure(e.loadedAt) + (e.depuis ? ', historique depuis le ' + fmt(e.depuis, 'date') : '') : 'Aucune donnée chargée';
 
         var bandeau = $('bandeau');
@@ -1015,15 +1041,17 @@
         $('btn-reinit').addEventListener('click', function () {
             etat.filtres.pfs = [];
             etat.filtres.mesure = 't';
+            etat.filtres.source = 'pesees';
+            etat.filtres.sens = 'L';
             CONFIG.selecteurs.forEach(function (s) { selecteurs[s[0]].vider(); });
             dessinerSocietes();
-            dessinerMesure();
+            dessinerSegments();
             choisirPeriode('mois');
         });
         $('fiche-retour').addEventListener('click', function () { etat.fiches.pop(); dessiner(); });
         $('fiche-fermer').addEventListener('click', function () { etat.fiches = []; dessiner(); });
 
-        dessinerMesure();
+        dessinerSegments();
         try {
             var meta = await dtFetch('meta');
             majEtat(meta.etat);

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>Livraisons | Agrivalor data-tools</title>
+  <title>Livraisons et transport | Agrivalor data-tools</title>
   <link rel="icon" href="/data-tools/_commun/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/data-tools/_commun/dt.css">
   <link rel="stylesheet" href="/data-tools/livraisons/style.css">
@@ -38,12 +38,19 @@
         <input id="au" class="dt-input tb-date" type="date" aria-label="Au">
       </div>
       <div class="dt-ligne tb-ligne-filtres">
+        <span class="tb-lib">Source</span>
+        <span id="source" class="tb-segment" role="group" aria-label="Source des données"></span>
+        <span class="tb-lib">Sens</span>
+        <span id="sens" class="tb-segment" role="group" aria-label="Sens"></span>
+        <span id="source-note" class="dt-muet"></span>
+      </div>
+      <div class="dt-ligne tb-ligne-filtres">
         <span class="tb-lib">Sociétés</span>
         <span id="societes" class="tb-chips" role="group" aria-label="Sociétés"></span>
         <span class="tb-lib">Graphiques en</span>
         <span id="mesure" class="tb-segment" role="group" aria-label="Mesure des graphiques"></span>
         <span class="dt-espace"></span>
-        <label class="tb-coche" title="Ajoute deux onglets avec tous les champs publiés par BC pour les BL et les lignes de la sélection">
+        <label class="tb-coche" title="Ajoute un onglet avec tous les champs publiés par BC pour les documents de la sélection">
           <input id="export-brut" type="checkbox" checked> données BC brutes
         </label>
         <button id="btn-export" type="button" class="dt-btn">Export Excel</button>
